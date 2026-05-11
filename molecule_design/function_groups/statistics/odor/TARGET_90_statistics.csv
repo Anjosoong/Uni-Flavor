@@ -1,0 +1,32 @@
+Functional Group,Design_Pattern,Molecules with Group,Total Molecules,Percentage
+Alkyl,*C,124,200,62.0
+Hydroxyl,*O,94,200,47.0
+Ketone,*C(=O)*,51,200,25.5
+Carboxyl,*C(=O)O,46,200,23.0
+Ether,*O*,33,200,16.5
+Benzene,*c1ccccc1,32,200,16.0
+Primary Amine,*NH2,23,200,11.5
+Ester,*C(=O)O*,21,200,10.5
+Double Bond (C=C),*C=C*,16,200,8.0
+Amide,*C(=O)N*,14,200,7.000000000000001
+Chlorine,*Cl,10,200,5.0
+Alkene,*C=C*,8,200,4.0
+Phenyl,*c1ccccc1,7,200,3.5000000000000004
+Tertiary Amine,*N(*)*,6,200,3.0
+Aldehyde,*C=O,5,200,2.5
+Carbonate,*OC(=O)O*,5,200,2.5
+Secondary Amine,*NH*,4,200,2.0
+Phosphoric,*P(=O)(O)O,4,200,2.0
+Lactone,*C(=O)O* (ring),4,200,2.0
+Nitroso,*N=O,3,200,1.5
+Imidazole,*c1c[nH]cn1,3,200,1.5
+Sulfonic,*S(=O)(=O)O,3,200,1.5
+Sulfonamide,*S(=O)(=O)N*,3,200,1.5
+Pyridine,*c1ccccn1,3,200,1.5
+Thiol,*S,2,200,1.0
+Iodine,*I,2,200,1.0
+Allyl,*CC=C,2,200,1.0
+Furan,*c1ccco1,1,200,0.5
+Vinyl,*C=C,1,200,0.5
+Cyano,*C#N,1,200,0.5
+Fluorine,*F,1,200,0.5

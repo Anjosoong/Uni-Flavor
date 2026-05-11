@@ -1,0 +1,16 @@
+Functional Group,Design_Pattern,Molecules with Group,Total Molecules,Percentage
+Alkyl,*C,115,120,95.83333333333334
+Thiol,*S,27,120,22.5
+Double Bond (C=C),*C=C*,27,120,22.5
+Ketone,*C(=O)*,12,120,10.0
+Alkene,*C=C*,9,120,7.5
+Furan,*c1ccco1,9,120,7.5
+Benzene,*c1ccccc1,8,120,6.666666666666667
+Hydroxyl,*O,4,120,3.3333333333333335
+Ester,*C(=O)O*,3,120,2.5
+Aldehyde,*C=O,3,120,2.5
+Thiophene,*c1cccs1,2,120,1.6666666666666667
+Ether,*O*,2,120,1.6666666666666667
+Phenyl,*c1ccccc1,1,120,0.8333333333333334
+Carboxyl,*C(=O)O,1,120,0.8333333333333334
+Primary Amine,*NH2,1,120,0.8333333333333334

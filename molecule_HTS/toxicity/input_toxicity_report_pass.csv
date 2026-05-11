@@ -1,0 +1,4 @@
+﻿SMILES,MW,LogP,TPSA,HBD,HBA,RotBonds,Rings,AromaticRings,HeavyAtoms,alert_hits,pains_brenk_hits,concern_alerts,caution_alerts,n_alerts,n_concern,n_caution,n_pains_brenk,verdict,reasons
+CCc1c(-c2cc(O)c(C)c(C(C)=O)c2)oc2cc(OC3OC(C)C(O)C(O)C3O)ccc2c1=O,484.17,2.45,146.66,4,9,5,4,3,35,,,,,0,0,0,0,PASS,
+CNC1OC(Oc2ccc3c(=O)c(C)c(-c4cc(C)c(C)c(OC)c4)oc3c2)C(O)C(O)C1O,471.19,1.76,130.62,4,9,5,4,3,34,,,,,0,0,0,0,PASS,
+CCc1c(-c2cc(C)c(Cl)c(O)c2)oc2cc(OC3OC(C)C(O)C(O)C3O)ccc2c1=O,476.12,2.9,129.59,4,8,4,4,3,33,,,,,0,0,0,0,PASS,

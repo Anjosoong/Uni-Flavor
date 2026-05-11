@@ -1,0 +1,7 @@
+﻿SMILES,MW,LogP,TPSA,HBD,HBA,RotBonds,Rings,AromaticRings,HeavyAtoms,alert_hits,pains_brenk_hits,concern_alerts,caution_alerts,n_alerts,n_concern,n_caution,n_pains_brenk,verdict,reasons
+CCc1c(-c2cc(C)c(C)c(O)c2)oc2cc(OC3OC(c4ccccc4)C(O)C(O)C3O)ccc2c1=O,518.19,3.9,129.59,4,8,5,5,4,38,,,,,0,0,0,0,CAUTION,CAUTION:PAH_like(aromatic_rings=4)
+Cc1cc(-c2ccccc2)oc1C(=O)O,202.06,2.95,50.44,1,2,2,2,2,15,Furan_ring(CAUTION),,,Furan_ring,1,0,1,0,CAUTION,CAUTION:Furan_ring
+CCC1OC(Oc2ccc3c(=O)c(-c4ccccc4)c(-c4cc(C)c(C)c(O)c4)oc3c2)C(O)C(O)C1O,518.19,4.05,129.59,4,8,5,5,4,38,,,,,0,0,0,0,CAUTION,CAUTION:PAH_like(aromatic_rings=4)
+Cc1cc(Cl)c(C(=O)O)o1,159.99,1.94,50.44,1,2,1,1,1,10,Furan_ring(CAUTION),,,Furan_ring,1,0,1,0,CAUTION,CAUTION:Furan_ring
+CC(=O)Cc1cc(C)c(-c2ccccc2)o1,214.1,3.39,30.21,0,2,3,2,2,16,Furan_ring(CAUTION),,,Furan_ring,1,0,1,0,CAUTION,CAUTION:Furan_ring
+CC(=O)c1cc(C)c(C(C)=O)o1,166.06,1.99,47.28,0,3,2,1,1,12,Furan_ring(CAUTION),,,Furan_ring,1,0,1,0,CAUTION,CAUTION:Furan_ring

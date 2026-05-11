@@ -1,0 +1,39 @@
+Functional Group,Design_Pattern,Count
+Alkyl,*C,4763
+Double Bond (C=C),*C=C*,1587
+Ester,*C(=O)O*,1572
+Benzene,*c1ccccc1,1032
+Hydroxyl,*O,957
+Ketone,*C(=O)*,888
+Ether,*O*,677
+Alkene,*C=C*,432
+Aldehyde,*C=O,378
+Carboxyl,*C(=O)O,224
+Thiol,*S,183
+Furan,*c1ccco1,148
+Lactone,*C(=O)O* (ring),126
+Phenyl,*c1ccccc1,90
+Amide,*C(=O)N*,64
+Allyl,*CC=C,62
+Primary Amine,*NH2,52
+Pyridine,*c1ccccn1,50
+Cyano,*C#N,45
+Thiophene,*c1cccs1,37
+Secondary Amine,*NH*,21
+Triple Bond (C#C),*C#C*,20
+Tertiary Amine,*N(*)*,16
+Chlorine,*Cl,15
+Vinyl,*C=C,14
+Nitroso,*N=O,11
+Pyrrole,*c1cc[nH]c1,7
+Carbonate,*OC(=O)O*,7
+Acrylate,*C=CC(=O)O*,4
+Phosphoric,*P(=O)(O)O,4
+Imidazole,*c1c[nH]cn1,3
+Sulfonic,*S(=O)(=O)O,3
+Sulfonamide,*S(=O)(=O)N*,3
+Iodine,*I,2
+Xylene,*c1cc(C)cc(C)c1,2
+Fluorine,*F,2
+Bromine,*Br,1
+Alkyne,*C#C*,1

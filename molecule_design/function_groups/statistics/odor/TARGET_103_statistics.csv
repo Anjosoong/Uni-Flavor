@@ -1,0 +1,11 @@
+Functional Group,Design_Pattern,Molecules with Group,Total Molecules,Percentage
+Alkyl,*C,31,36,86.11111111111111
+Ketone,*C(=O)*,26,36,72.22222222222221
+Double Bond (C=C),*C=C*,4,36,11.11111111111111
+Pyridine,*c1ccccn1,3,36,8.333333333333332
+Secondary Amine,*NH*,2,36,5.555555555555555
+Ether,*O*,2,36,5.555555555555555
+Pyrrole,*c1cc[nH]c1,1,36,2.7777777777777777
+Amide,*C(=O)N*,1,36,2.7777777777777777
+Tertiary Amine,*N(*)*,1,36,2.7777777777777777
+Thiol,*S,1,36,2.7777777777777777

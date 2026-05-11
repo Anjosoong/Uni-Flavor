@@ -1,0 +1,16 @@
+Functional Group,Design_Pattern,Molecules with Group,Total Molecules,Percentage
+Alkyl,*C,54,56,96.42857142857143
+Double Bond (C=C),*C=C*,31,56,55.35714285714286
+Ester,*C(=O)O*,21,56,37.5
+Benzene,*c1ccccc1,14,56,25.0
+Ketone,*C(=O)*,12,56,21.428571428571427
+Alkene,*C=C*,9,56,16.071428571428573
+Hydroxyl,*O,8,56,14.285714285714285
+Ether,*O*,8,56,14.285714285714285
+Lactone,*C(=O)O* (ring),3,56,5.357142857142857
+Pyrrole,*c1cc[nH]c1,1,56,1.7857142857142856
+Aldehyde,*C=O,1,56,1.7857142857142856
+Pyridine,*c1ccccn1,1,56,1.7857142857142856
+Carboxyl,*C(=O)O,1,56,1.7857142857142856
+Allyl,*CC=C,1,56,1.7857142857142856
+Thiol,*S,1,56,1.7857142857142856

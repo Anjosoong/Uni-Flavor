@@ -1,0 +1,8 @@
+Functional Group,Design_Pattern,Molecules with Group,Total Molecules,Percentage
+Alkyl,*C,48,48,100.0
+Ketone,*C(=O)*,44,48,91.66666666666666
+Double Bond (C=C),*C=C*,17,48,35.41666666666667
+Ester,*C(=O)O*,3,48,6.25
+Hydroxyl,*O,3,48,6.25
+Furan,*c1ccco1,1,48,2.083333333333333
+Lactone,*C(=O)O* (ring),1,48,2.083333333333333

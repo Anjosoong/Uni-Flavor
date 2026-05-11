@@ -1,0 +1,59 @@
+{
+  "n_molecules": 669052,
+  "fusion_dim": 384,
+  "reduce_method": "trimap",
+  "sample_size": null,
+  "nmf_recon_error": 124.11770544145578,
+  "nmf_labels": [
+    "TARGET_01",
+    "TARGET_02",
+    "TARGET_03",
+    "TARGET_04",
+    "TARGET_05",
+    "TARGET_06"
+  ],
+  "include_other_in_nmf": true,
+  "include_other_in_combined": true,
+  "nmf_components": {
+    "R": [
+      3.5451051071243924,
+      36.17159336661401,
+      1.9704543883604635,
+      1.2332269076344862,
+      1.5526766228011115,
+      0.0
+    ],
+    "G": [
+      0.29015359727206874,
+      5.871229058328589,
+      2.958459080095025,
+      7.592579170807404,
+      1.4550268396460608,
+      30.460390713648984
+    ],
+    "B": [
+      16.287455989143798,
+      0.25879541427532526,
+      1.132571545927487,
+      1.8405217224319657,
+      0.5432412143677045,
+      0.757752398873234
+    ]
+  },
+  "taste_labels": [
+    "TARGET_01",
+    "TARGET_02",
+    "TARGET_03",
+    "TARGET_04",
+    "TARGET_05",
+    "TARGET_06"
+  ],
+  "taste_names": {
+    "TARGET_01": "Sweet",
+    "TARGET_02": "Bitter",
+    "TARGET_03": "Umami",
+    "TARGET_04": "Sour",
+    "TARGET_05": "Salty",
+    "TARGET_06": "Secondary Taste"
+  }
+}

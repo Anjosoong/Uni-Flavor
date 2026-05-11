@@ -1,0 +1,40 @@
+{
+  "input_total": 738436,
+  "passed": 669056,
+  "removed_by_filter": 68562,
+  "removed_by_dedup": 818,
+  "total_removed": 69380,
+  "removal_rate_pct": 9.4,
+  "filter_reasons": {
+    "rot_bonds>28": 62299,
+    "mw>1500": 3083,
+    "heavy_atoms>120": 2897,
+    "non_organic": 272,
+    "too_short": 7,
+    "invalid_smiles": 4
+  },
+  "filters_applied": {
+    "max_heavy_atoms": 120,
+    "max_mw": 1500.0,
+    "max_rot_bonds": 28,
+    "max_ring_size": null,
+    "dedup_by_canonical": true
+  },
+  "property_stats_passed": {
+    "heavy_atoms": {
+      "min": 2,
+      "median": 30.0,
+      "mean": 33.0,
+      "max": 108
+    },
+    "mw": {
+      "min": 26.0,
+      "median": 414.3,
+      "max": 1498.7
+    },
+    "rot_bonds": {
+      "max": 28,
+      "mean": 5.9
+    }
+  }
+}

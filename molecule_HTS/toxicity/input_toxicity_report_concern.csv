@@ -1,0 +1,2 @@
+﻿SMILES,MW,LogP,TPSA,HBD,HBA,RotBonds,Rings,AromaticRings,HeavyAtoms,alert_hits,pains_brenk_hits,concern_alerts,caution_alerts,n_alerts,n_concern,n_caution,n_pains_brenk,verdict,reasons
+Cc1cc(C(=O)O)c(N)o1,141.04,0.87,76.46,2,3,1,1,1,10,Aromatic_amine(CONCERN); Furan_ring(CAUTION),,Aromatic_amine,Furan_ring,2,1,1,0,CONCERN,CONCERN:Aromatic_amine | CAUTION:Furan_ring

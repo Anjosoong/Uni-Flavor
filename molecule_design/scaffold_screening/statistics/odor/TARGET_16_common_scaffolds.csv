@@ -1,0 +1,21 @@
+Murcko_Scaffold,Scaffold_with_Attachments,Count,Total Positive Molecules,Percentage
+c1ccccc1,[1*]c1ccc([2*])c([3*])c1,27,64,42.1875
+c1ccsc1,[1*]c1ccc([2*])s1,3,64,4.6875
+C1CCCCC1,[1*]C1CCC([2*])([3*])C([4*])C1,2,64,3.125
+O=c1[nH]c(=O)c2[nH]cnc2[nH]1,[1*]n1c(=O)c2c(ncn2[2*])n([3*])c1=O,2,64,3.125
+c1ccc(C2OCCO2)cc1,[1*]c1ccc(C2OCC([2*])O2)cc1,2,64,3.125
+O=C(OCc1ccccc1)c1ccccc1,O=C(OCc1ccccc1)c1ccccc1,1,64,1.5625
+O=C(Cc1ccccc1)Cc1ccccc1,O=C(Cc1ccccc1)Cc1ccccc1,1,64,1.5625
+c1ccc2cnccc2c1,c1ccc2cnccc2c1,1,64,1.5625
+c1ccc2c(c1)OCO2,[1*]c1ccc2c(c1)OCO2,1,64,1.5625
+c1ccc2occc2c1,[1*]c1cc2ccccc2o1,1,64,1.5625
+O=C(C=Cc1ccccc1)OC1CCCCC1,O=C(C=Cc1ccccc1)OC1CCCCC1,1,64,1.5625
+C1CCC2CCCCC2C1,[1*]C1C([2*])([3*])CCC2C([4*])([5*])CCCC12[6*],1,64,1.5625
+C=C1CCC=CC1=O,[1*]C1=CC(=O)C(=C([2*])[3*])CC1,1,64,1.5625
+c1cc[nH]c1,[1*]c1ccc[nH]1,1,64,1.5625
+c1ncc(C[n+]2ccsc2)cn1,[1*]c1ncc(C[n+]2csc([2*])c2[3*])c([4*])n1,1,64,1.5625
+c1ccc(-c2ccccc2)cc1,[1*]c1ccc([2*])c(-c2cc([3*])ccc2[4*])c1,1,64,1.5625
+C(=Nc1ccccc1)c1ccccc1,[1*]c1ccccc1N=Cc1ccccc1,1,64,1.5625
+O=C1CCCCO1,[1*]C1CC([2*])([3*])CC(=O)O1,1,64,1.5625
+c1ccncc1,[1*]c1ccnc([2*])c1,1,64,1.5625
+c1ccc(C2CCCCO2)cc1,[1*]C1CCOC(c2ccccc2)C1,1,64,1.5625

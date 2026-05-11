@@ -1,0 +1,11 @@
+Functional Group,Design_Pattern,Molecules with Group,Total Molecules,Percentage
+Alkyl,*C,36,36,100.0
+Hydroxyl,*O,24,36,66.66666666666666
+Double Bond (C=C),*C=C*,20,36,55.55555555555556
+Alkene,*C=C*,15,36,41.66666666666667
+Ester,*C(=O)O*,7,36,19.444444444444446
+Ether,*O*,4,36,11.11111111111111
+Benzene,*c1ccccc1,2,36,5.555555555555555
+Allyl,*CC=C,1,36,2.7777777777777777
+Ketone,*C(=O)*,1,36,2.7777777777777777
+Cyano,*C#N,1,36,2.7777777777777777

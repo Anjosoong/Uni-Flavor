@@ -1,0 +1,11 @@
+Murcko_Scaffold,Scaffold_with_Attachments,Count,Total Positive Molecules,Percentage
+c1ccccc1,[1*]c1ccccc1[2*],9,49,18.367346938775512
+O=c1ccocc1,[1*]c1occc(=O)c1[2*],5,49,10.204081632653061
+c1ccc(C2CO2)cc1,[1*]C1([2*])OC1([3*])c1ccccc1,3,49,6.122448979591836
+O=C1C=COC1,[1*]C1=C([2*])C(=O)C([3*])O1,3,49,6.122448979591836
+c1ccc2ccccc2c1,[1*]c1ccc2ccccc2c1,2,49,4.081632653061225
+c1ccoc1,[1*]c1ccco1,2,49,4.081632653061225
+c1ccc2c(c1)OCO2,[1*]c1ccc2c(c1)OCO2,1,49,2.0408163265306123
+C1COCO1,[1*]C1([2*])OCC([3*])O1,1,49,2.0408163265306123
+C1=CCCCC1,[1*]C1=C([2*])CCCC1([3*])[4*],1,49,2.0408163265306123
+C1CCSC1,[1*]C1([2*])CCC([3*])S1,1,49,2.0408163265306123

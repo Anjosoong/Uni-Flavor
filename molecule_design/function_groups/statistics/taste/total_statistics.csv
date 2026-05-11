@@ -1,0 +1,49 @@
+Functional Group,Design_Pattern,Count
+Alkyl,*C,15976
+Hydroxyl,*O,10656
+Benzene,*c1ccccc1,7336
+Ether,*O*,7065
+Ketone,*C(=O)*,4703
+Carboxyl,*C(=O)O,4650
+Amide,*C(=O)N*,3577
+Double Bond (C=C),*C=C*,3114
+Ester,*C(=O)O*,2817
+Phenyl,*c1ccccc1,2517
+Primary Amine,*NH2,1949
+Alkene,*C=C*,690
+Chlorine,*Cl,626
+Phosphoric,*P(=O)(O)O,611
+Sulfonamide,*S(=O)(=O)N*,560
+Aldehyde,*C=O,539
+Lactone,*C(=O)O* (ring),513
+Nitroso,*N=O,492
+Sulfonic,*S(=O)(=O)O,475
+Fluorine,*F,401
+Polypeptide,*NH-*CH-C(=O)-NH-*CH-C(=O)*,346
+Tertiary Amine,*N(*)*,297
+Thiol,*S,238
+Bromine,*Br,221
+Secondary Amine,*NH*,205
+Pyridine,*c1ccccn1,197
+Cyano,*C#N,184
+Lactam,*C(=O)N* (ring),176
+Furan,*c1ccco1,174
+Allyl,*CC=C,169
+Iodine,*I,89
+Triple Bond (C#C),*C#C*,54
+Vinyl,*C=C,52
+Imidazole,*c1c[nH]cn1,46
+Thiophene,*c1cccs1,40
+Pyrrole,*c1cc[nH]c1,31
+Xylene,*c1cc(C)cc(C)c1,29
+Carbamate Ester,*NC(=O)O*,23
+Acrylate,*C=CC(=O)O*,20
+Vinyl Ether,*C=CO*,17
+Diphenyl,*c1ccccc1-c2ccccc2,17
+Halogenated Aromatic,*c1ccccc1-[X] (X=F/Cl/Br/I),13
+Carbonate,*OC(=O)O*,12
+Alkyne,*C#C*,11
+Trifluoromethyl,*C(F)(F)F,9
+Oxime,*C=NO,6
+Isocyanate,*N=C=O,2
+Anhydride,*C(=O)OC(=O)*,2
