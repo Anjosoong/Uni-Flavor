@@ -2,7 +2,7 @@
 
 Flavor (odor and taste) molecule prediction, virtual screening, and reverse design pipeline based on [Uni-Mol2](https://github.com/deepmodeling/Uni-Mol).
 
-![Model architecture](picture.tif)
+![Model architecture](picture.jpg)
 
 > Dual-branch fusion architecture shared by DLMOF-Net (138-class odor) and DLMTF-Net (6-class taste).
 
