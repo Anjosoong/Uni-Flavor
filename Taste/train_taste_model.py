@@ -6,7 +6,7 @@ Architecture:
   Mordred branch : D   -> 256 -> H  (LayerNorm + GELU + Dropout)
   Fusion         : cat(h_e, h_d, h_e * h_d) -> 3H -> 2H -> H
   Label head     : logits = Linear(H->Q) @ E_label^T + b
-  Aux heads      : Linear(H->C) per branch (training only, blended at inference)
+  Aux heads      : Linear(H->C) per branch (deep supervision; blended at inference)
 
 Loss: Asymmetric Loss (Ridnik et al., ICCV 2021) with per-label inverse-frequency weighting.
 Augmentation: Gaussian noise, feature masking, asymmetric mixup.
@@ -21,7 +21,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from copy import deepcopy
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 
 import numpy as np
 import pandas as pd
@@ -35,7 +35,7 @@ from sklearn.model_selection import StratifiedKFold
 
 DEFAULT_CONFIG = {
     # Data paths
-    'unimol_train_path':  r'./unimol_feature/finetune_feature/train_output/train_data_molecular_features.npy',
+    'unimol_train_path':  r'./unimol_feature/fintune_feature/train_output/train_data_molecular_features.npy',
     'mordred_train_path': r'./mordred/taste_descriptors/train_processed.csv',
     'labels_train_path':  r'./Data/processed_data/train_data.csv',
     'output_base': r'./model',
@@ -99,8 +99,8 @@ DEFAULT_CONFIG = {
     'label_weight_power': 0.5,    # sqrt of inverse frequency (softer than linear)
     'label_weight_clip': 20.0,    # cap to avoid extreme weights on very rare labels
 
-    # Early stopping monitor: macro_f1 — more sensitive than AUROC+AUPRC (which plateaus early)
-    'es_monitor': 'macro_f1',
+    # Early stopping monitor: (macro_auroc + macro_auprc) / 2
+    'es_monitor': 'auroc_auprc',
 
     # CV
     'n_folds': 5,
@@ -392,6 +392,89 @@ def ensemble_probs(outputs: Dict, weights) -> np.ndarray:
     return p
 
 
+def resolve_model_dir(model_dir: str) -> str:
+    """Resolve to a run directory containing config.json."""
+    if os.path.exists(os.path.join(model_dir, 'config.json')):
+        return model_dir
+    latest_txt = os.path.join(model_dir, 'latest.txt')
+    if os.path.exists(latest_txt):
+        with open(latest_txt) as f:
+            return f.read().strip()
+    subdirs = sorted(d for d in os.listdir(model_dir)
+                     if os.path.isdir(os.path.join(model_dir, d)))
+    if not subdirs:
+        raise FileNotFoundError(f"No model found in {model_dir}")
+    return os.path.join(model_dir, subdirs[-1])
+
+
+def load_run_config(model_dir: str) -> Tuple[dict, list]:
+    with open(os.path.join(model_dir, 'config.json')) as f:
+        config = json.load(f)
+    with open(os.path.join(model_dir, 'label_cols.json')) as f:
+        label_cols = json.load(f)
+    return config, label_cols
+
+
+def build_model(config: dict, device: torch.device) -> EnhancedMultiLabelModel:
+    return EnhancedMultiLabelModel(
+        embed_dim=config['embed_dim'],
+        desc_dim=config['desc_dim'],
+        hidden_dim=config['hidden_dim'],
+        query_dim=config['query_dim'],
+        num_classes=config['num_classes'],
+        dropout=config['dropout'],
+        use_aux_loss=config['use_aux_loss'],
+    ).to(device)
+
+
+def load_fold_models(model_dir: str, device: torch.device,
+                     verbose: bool = True) -> Tuple[List[EnhancedMultiLabelModel],
+                                                    np.ndarray, dict, list]:
+    """Load all fold checkpoints. Returns models, avg_thresholds, config, label_cols."""
+    config, label_cols = load_run_config(model_dir)
+    fold_dirs = sorted(d for d in os.listdir(model_dir) if d.startswith('fold_'))
+    models, thresholds_list = [], []
+
+    for fd in fold_dirs:
+        ckpt = torch.load(os.path.join(model_dir, fd, 'model.pt'),
+                          map_location=device, weights_only=False)
+        model = build_model(config, device)
+        model.load_state_dict(ckpt['model_state_dict'])
+        model.eval()
+        models.append(model)
+        thresholds_list.append(ckpt['thresholds'])
+        if verbose:
+            print(f"  Loaded {fd}")
+
+    return models, np.mean(thresholds_list, axis=0), config, label_cols
+
+
+@torch.no_grad()
+def predict_batch(model: nn.Module, loader: DataLoader, device: torch.device,
+                  infer_weights) -> np.ndarray:
+    model.eval()
+    all_probs = []
+    for x_embed, x_desc, _ in loader:
+        x_embed, x_desc = x_embed.to(device), x_desc.to(device)
+        out = model(x_embed, x_desc)
+        all_probs.append(ensemble_probs(out, infer_weights))
+    return np.vstack(all_probs)
+
+
+@torch.no_grad()
+def predict_single_ensemble(models: List[EnhancedMultiLabelModel],
+                            x_embed: np.ndarray, x_desc: np.ndarray,
+                            infer_weights, device: torch.device) -> np.ndarray:
+    """Ensemble inference for one sample. Returns average probabilities (C,)."""
+    x_embed_t = torch.tensor(x_embed[np.newaxis], dtype=torch.float32, device=device)
+    x_desc_t = torch.tensor(x_desc[np.newaxis], dtype=torch.float32, device=device)
+    all_probs = []
+    for model in models:
+        out = model(x_embed_t, x_desc_t)
+        all_probs.append(ensemble_probs(out, infer_weights)[0])
+    return np.mean(all_probs, axis=0)
+
+
 def train_epoch(model: nn.Module, loader: DataLoader, asl_fn: AsymmetricLoss,
                 optimizer, scheduler, ema: Optional[ModelEMA],
                 device: torch.device, config: Dict, epoch: int,
@@ -579,8 +662,7 @@ def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
                 f"Monitor={(val_m['macro_auroc']+val_m['macro_auprc'])/2:.4f}"
             )
 
-        # Early stopping on combined AUROC+AUPRC (matches MLP baseline)
-        monitor_val = (val_m['macro_auroc'] + val_m['macro_auprc']) / 2
+        monitor_val = (val_m['macro_auroc'] + val_m['macro_auprc']) / 2  # es_monitor: auroc_auprc
         if monitor_val > best_monitor:
             best_monitor = monitor_val
             patience = 0

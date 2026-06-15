@@ -3,14 +3,10 @@ DLMTF-Net Test Script — Ensemble inference across all folds with per-label tun
 """
 
 import os
-import json
 import argparse
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from sklearn.metrics import (
@@ -18,7 +14,13 @@ from sklearn.metrics import (
     average_precision_score, roc_auc_score
 )
 
-from train_taste_model import EnhancedMultiLabelModel, MolecularDataset, ensemble_probs
+from train_taste_model import (
+    MolecularDataset,
+    resolve_model_dir,
+    load_run_config,
+    load_fold_models,
+    predict_batch,
+)
 
 
 def safe_roc(y_true, y_score):
@@ -87,18 +89,6 @@ def compute_overall_metrics(y_true, y_pred, y_prob, label_cols):
     }
 
 
-@torch.no_grad()
-def predict(model: nn.Module, loader: DataLoader, device: torch.device,
-            infer_weights) -> np.ndarray:
-    model.eval()
-    all_probs = []
-    for x_embed, x_desc, _ in loader:
-        x_embed, x_desc = x_embed.to(device), x_desc.to(device)
-        out = model(x_embed, x_desc)
-        all_probs.append(ensemble_probs(out, infer_weights))
-    return np.vstack(all_probs)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_dir', type=str, default=None)
@@ -110,29 +100,12 @@ def main():
                         default=r'./Data/processed_data/test_data.csv')
     args = parser.parse_args()
 
-    # Auto-detect model directory
-    base_dir = r'./model/taste_train_finetune'
-    if args.model_dir:
-        model_dir = args.model_dir
-    else:
-        latest_txt = os.path.join(base_dir, 'latest.txt')
-        if os.path.exists(latest_txt):
-            with open(latest_txt) as f:
-                model_dir = f.read().strip()
-        else:
-            dirs = sorted([d for d in os.listdir(base_dir)
-                           if os.path.isdir(os.path.join(base_dir, d))])
-            if not dirs:
-                raise FileNotFoundError(f"No model directories in {base_dir}")
-            model_dir = os.path.join(base_dir, dirs[-1])
+    # Auto-detect model directory (reads ./model/latest.txt written by train_taste_model.py)
+    model_dir = resolve_model_dir(args.model_dir or r'./model')
 
     print(f"Model directory: {model_dir}")
 
-    with open(os.path.join(model_dir, 'config.json')) as f:
-        config = json.load(f)
-
-    with open(os.path.join(model_dir, 'label_cols.json')) as f:
-        label_cols = json.load(f)
+    config, label_cols = load_run_config(model_dir)
 
     # Load data
     print("\nLoading test data...")
@@ -158,34 +131,17 @@ def main():
     test_ds = MolecularDataset(X_embed, X_desc, Y)
     test_loader = DataLoader(test_ds, batch_size=config['batch_size'])
 
-    fold_dirs = sorted([d for d in os.listdir(model_dir) if d.startswith('fold_')])
-    print(f"\nFound {len(fold_dirs)} fold models")
+    print("\nLoading fold models...")
+    models, avg_thresholds, config, label_cols = load_fold_models(model_dir, device)
+    print(f"Found {len(models)} fold models")
 
     all_fold_probs = []
-    all_fold_thresholds = []
-
-    for fd in fold_dirs:
-        ckpt = torch.load(os.path.join(model_dir, fd, 'model.pt'),
-                          map_location=device, weights_only=False)
-
-        model = EnhancedMultiLabelModel(
-            embed_dim=config['embed_dim'],
-            desc_dim=config['desc_dim'],
-            hidden_dim=config['hidden_dim'],
-            query_dim=config['query_dim'],
-            num_classes=config['num_classes'],
-            dropout=config['dropout'],
-            use_aux_loss=config['use_aux_loss']
-        ).to(device)
-
-        model.load_state_dict(ckpt['model_state_dict'])
-        probs = predict(model, test_loader, device, config['infer_weights'])
+    for i, model in enumerate(models):
+        probs = predict_batch(model, test_loader, device, config['infer_weights'])
         all_fold_probs.append(probs)
-        all_fold_thresholds.append(ckpt['thresholds'])
-        print(f"  {fd}: loaded")
+        print(f"  fold_{i + 1}: loaded")
 
-    avg_probs = np.mean(all_fold_probs, axis=0)          # [N, C]
-    avg_thresholds = np.mean(all_fold_thresholds, axis=0) # [C]
+    avg_probs = np.mean(all_fold_probs, axis=0)
     ensemble_pred = (avg_probs >= avg_thresholds).astype(int)
 
     print(f"\nThresholds: min={avg_thresholds.min():.2f}  "
@@ -194,7 +150,7 @@ def main():
     print("\nComputing metrics...")
     overall = compute_overall_metrics(Y, ensemble_pred, avg_probs, label_cols)
     overall['Model'] = 'DLMTF-Net'
-    overall['N_Folds'] = len(fold_dirs)
+    overall['N_Folds'] = len(models)
 
     per_label = compute_per_label_metrics(Y, ensemble_pred, avg_probs, label_cols)
 

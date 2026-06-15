@@ -1,10 +1,10 @@
 """
-DLMTF-Net Interpretability — Integrated Gradients with UniMol Atom-level Attribution
+DLMOF-Net Interpretability — Integrated Gradients with UniMol Atom-level Attribution
 
 For a given SMILES:
   1. Extract UniMol cls_repr (768-dim) and atomic_reprs (N_atoms x 768)
   2. Compute Mordred descriptors -> feature selection -> normalization (300-dim)
-  3. Run DLMTF-Net ensemble forward to get label predictions
+  3. Run DLMOF-Net ensemble forward to get label predictions
   4. Compute Integrated Gradients on the UniMol branch (x_embed) per label
   5. Map IG attributions to atom contributions via cosine similarity
   6. Visualize: molecule heatmap + atom contribution bars + label probability bars
@@ -16,9 +16,7 @@ Usage:
 
 import os
 import sys
-import json
 import pickle
-import importlib
 import argparse
 import warnings
 import io
@@ -88,7 +86,12 @@ except ImportError:
 
 from mordred import Calculator, descriptors as mordred_descriptors
 
-from train_odor_model import EnhancedMultiLabelModel, ensemble_probs
+from train_odor_model import (
+    EnhancedMultiLabelModel,
+    resolve_model_dir,
+    load_fold_models,
+    predict_single_ensemble,
+)
 
 
 # Default paths
@@ -96,7 +99,7 @@ CONFIG = {
     'unimol_checkpoint': r'./checkpoint/checkpoint_odor_finetune.pt',
     'model_size':        '84m',
     'transformers_pkl':  r'./mordred/odor_descriptors/transformers.pkl',
-    'model_base_dir':    r'./model/odor_train_finetune',
+    'model_base_dir':    r'./model',
     'output_dir':        r'./interpretability_results',
     'ig_steps':          50,
 }
@@ -254,56 +257,6 @@ def compute_mordred_features(smiles: str, transformers: dict) -> np.ndarray:
     X = scaler.transform(X)
 
     return X[0].astype(np.float32)
-
-
-# DLMTF-Net
-def load_dlmtf_models(model_dir: str, device: torch.device):
-    """Load all fold models. Returns (models, avg_thresholds, config, label_cols)."""
-    with open(os.path.join(model_dir, 'config.json')) as f:
-        config = json.load(f)
-    with open(os.path.join(model_dir, 'label_cols.json')) as f:
-        label_cols = json.load(f)
-
-    fold_dirs = sorted([d for d in os.listdir(model_dir) if d.startswith('fold_')])
-    models = []
-    thresholds_list = []
-
-    for fd in fold_dirs:
-        ckpt = torch.load(os.path.join(model_dir, fd, 'model.pt'),
-                          map_location=device, weights_only=False)
-        model = EnhancedMultiLabelModel(
-            embed_dim=config['embed_dim'],
-            desc_dim=config['desc_dim'],
-            hidden_dim=config['hidden_dim'],
-            query_dim=config['query_dim'],
-            num_classes=config['num_classes'],
-            dropout=config['dropout'],
-            use_aux_loss=config['use_aux_loss'],
-        ).to(device)
-        model.load_state_dict(ckpt['model_state_dict'])
-        model.eval()
-        models.append(model)
-        thresholds_list.append(ckpt['thresholds'])
-        print(f"  Loaded {fd}")
-
-    avg_thresholds = np.mean(thresholds_list, axis=0)
-    return models, avg_thresholds, config, label_cols
-
-
-def run_ensemble(models: list, x_embed_np: np.ndarray, x_desc_np: np.ndarray,
-                 config: dict, device: torch.device) -> np.ndarray:
-    """Ensemble inference. Returns avg_probs (C,)."""
-    x_embed = torch.tensor(x_embed_np[np.newaxis], dtype=torch.float32, device=device)
-    x_desc  = torch.tensor(x_desc_np[np.newaxis],  dtype=torch.float32, device=device)
-
-    all_probs = []
-    with torch.no_grad():
-        for model in models:
-            out = model(x_embed, x_desc)
-            probs = ensemble_probs(out, config['infer_weights'])
-            all_probs.append(probs[0])
-
-    return np.mean(all_probs, axis=0)
 
 
 # Integrated Gradients
@@ -531,21 +484,6 @@ def visualize_atom_importance(smiles: str,
 
 
 # Main pipeline
-def _resolve_model_dir(model_dir: str) -> str:
-    """Auto-detect latest run if model_dir has no config.json."""
-    if os.path.exists(os.path.join(model_dir, 'config.json')):
-        return model_dir
-    latest_txt = os.path.join(model_dir, 'latest.txt')
-    if os.path.exists(latest_txt):
-        with open(latest_txt) as f:
-            return f.read().strip()
-    subdirs = sorted([d for d in os.listdir(model_dir)
-                      if os.path.isdir(os.path.join(model_dir, d))])
-    if not subdirs:
-        raise FileNotFoundError(f"No model found in {model_dir}")
-    return os.path.join(model_dir, subdirs[-1])
-
-
 def analyze_molecule(smiles: str,
                       model_dir: Optional[str]      = None,
                       transformers_pkl: Optional[str] = None,
@@ -558,7 +496,7 @@ def analyze_molecule(smiles: str,
     Full interpretability pipeline for one SMILES.
     Returns list of result dicts (one per analyzed label).
     """
-    model_dir        = _resolve_model_dir(model_dir or CONFIG['model_base_dir'])
+    model_dir        = resolve_model_dir(model_dir or CONFIG['model_base_dir'])
     transformers_pkl = transformers_pkl or CONFIG['transformers_pkl']
     checkpoint_path  = checkpoint_path  or CONFIG['unimol_checkpoint']
     model_size       = model_size       or CONFIG['model_size']
@@ -603,16 +541,18 @@ def analyze_molecule(smiles: str,
     }).to_csv(mordred_csv, index=False)
     print(f"  Mordred features saved: {mordred_csv}")
 
-    # Step 3: Load DLMTF-Net
-    print("\n[3] Loading DLMTF-Net models...")
-    models, avg_thresholds, config, label_cols = load_dlmtf_models(model_dir, device)
+    # Step 3: Load DLMOF-Net
+    print("\n[3] Loading DLMOF-Net models...")
+    models, avg_thresholds, config, label_cols = load_fold_models(model_dir, device)
 
     config['embed_dim'] = int(cls_repr.shape[0])
     config['desc_dim']  = int(desc_vec.shape[0])
 
     # Step 4: Ensemble prediction
     print("\n[4] Running ensemble prediction...")
-    avg_probs   = run_ensemble(models, cls_repr, desc_vec, config, device)
+    avg_probs = predict_single_ensemble(
+        models, cls_repr, desc_vec, config['infer_weights'], device,
+    )
     predictions = (avg_probs >= avg_thresholds).astype(int)
 
     print("  Top-10 label probabilities:")
@@ -696,7 +636,7 @@ def analyze_molecule(smiles: str,
 def main():
     """CLI entry point for SMILES-level interpretability analysis."""
     parser = argparse.ArgumentParser(
-        description='DLMTF-Net Integrated Gradients Interpretability'
+        description='DLMOF-Net Integrated Gradients Interpretability'
     )
     parser.add_argument('--smiles',          type=str, required=True,
                         help='SMILES string to analyze')
