@@ -1,0 +1,38 @@
+{
+    "task": "taste",
+    "base_dir": "../Taste",
+    "num_classes": 6,
+
+    "labels_train_path": "Data/processed_data/train_data.csv",
+    "labels_test_path": "Data/processed_data/test_data.csv",
+
+    "n_folds": 5,
+    "random_state": 42,
+    "tune_thresholds": true,
+    "threshold_grid_step": 0.02,
+    "output_base": "./output/taste",
+
+    "mpnn_hidden_dim": 128,
+    "mpnn_num_layers": 3,
+    "mpnn_batch_size": 64,
+    "mpnn_lr": 1e-3,
+    "mpnn_num_epochs": 100,
+    "mpnn_patience": 15,
+
+    "chemberta_model_name": "DeepChem/ChemBERTa-77M-MTR",
+    "chemberta_model_dir": "chemberta/pretrained/DeepChem-ChemBERTa-77M-MTR",
+    "chemberta_max_length": 256,
+    "chemberta_batch_size": 32,
+    "chemberta_lr": 2e-5,
+    "chemberta_encoder_lr_scale": 0.1,
+    "chemberta_weight_decay": 0.01,
+    "chemberta_max_grad_norm": 1.0,
+    "chemberta_use_label_weights": true,
+    "chemberta_label_weight_power": 0.5,
+    "chemberta_label_weight_clip": 20.0,
+    "chemberta_asl_gamma_neg": 4,
+    "chemberta_asl_gamma_pos": 0,
+    "chemberta_asl_clip": 0.05,
+    "chemberta_num_epochs": 40,
+    "chemberta_patience": 12
+}

@@ -1,0 +1,12 @@
+# Pinned versions for reproducible benchmark runs.
+# Install: pip install -r requirements-benchmark.txt
+chemprop==2.2.3
+torch
+transformers
+huggingface_hub
+safetensors
+rdkit
+pandas
+numpy
+scikit-learn
+tqdm
