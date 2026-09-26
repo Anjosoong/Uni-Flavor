@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 CONFIG = {
     'input_file': r'/Data/processed_data/taste_data/test_data.csv',
-    'output_dir': r'./unimol_feature/fintune_feature/test_output',
+    'output_dir': r'./unimol_feature/finetune_feature/test_output',
     'smiles_column': 'SMILES',
     'model_size': '84m',  # 84m, 164m, 310m, 570m, 1.1B
     'checkpoint_path': r'./checkpoint/checkpoint_taste_finetune.pt',  # optional custom checkpoint path

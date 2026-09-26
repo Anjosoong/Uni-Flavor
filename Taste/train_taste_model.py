@@ -1,21 +1,24 @@
-"""
-Dual-branch Label-aware Molecular Taste Fusion Network (DLMTF-Net)
+"""Train DLMTF-Net for multilabel molecular taste prediction.
 
-Architecture:
-  UniMol branch  : 768 -> 512 -> H  (LayerNorm + GELU + Dropout)
-  Mordred branch : D   -> 256 -> H  (LayerNorm + GELU + Dropout)
-  Fusion         : cat(h_e, h_d, h_e * h_d) -> 3H -> 2H -> H
-  Label head     : logits = Linear(H->Q) @ E_label^T + b
-  Aux heads      : Linear(H->C) per branch (deep supervision; blended at inference)
+DLMTF-Net encodes UniMol embeddings and Mordred descriptors in separate MLP
+branches. Their representations and element-wise interaction are fused before
+a label-query head produces one logit per taste class. Auxiliary branch heads
+provide deep supervision and are blended with the main head during inference.
 
-Loss: Asymmetric Loss (Ridnik et al., ICCV 2021) with per-label inverse-frequency weighting.
-Augmentation: Gaussian noise, feature masking, asymmetric mixup.
-Training: EMA, cosine LR with linear warmup, 5-fold cross-validation.
+Training uses asymmetric loss with inverse-frequency label weights, optional
+feature augmentation, exponential moving average weights, and a warmup cosine
+learning-rate schedule. Independent seeds are evaluated with repeated
+multilabel-stratified five-fold cross-validation. For each repeat, complete
+out-of-fold predictions produce the threshold vector used by its five-fold
+ensemble. Checkpoints, histories, OOF predictions, thresholds, and metrics are
+stored under the corresponding repeat directory.
 """
 
 import os
 import json
 import math
+import random
+import re
 import logging
 import argparse
 from pathlib import Path
@@ -30,14 +33,35 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from sklearn.metrics import f1_score, average_precision_score, roc_auc_score
-from sklearn.model_selection import StratifiedKFold
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+
+
+# Base seed; repeat i uses GLOBAL_SEED + i.
+GLOBAL_SEED = 42
+
+
+def set_global_seed(seed: int = GLOBAL_SEED) -> None:
+    """Seed Python, NumPy, and PyTorch and request deterministic kernels."""
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 
 DEFAULT_CONFIG = {
+
     # Data paths
-    'unimol_train_path':  r'./unimol_feature/fintune_feature/train_output/train_data_molecular_features.npy',
+    'unimol_train_path':  r'./unimol_feature/random_init/train_output/train_data_molecular_features.npy',
     'mordred_train_path': r'./mordred/taste_descriptors/train_processed.csv',
     'labels_train_path':  r'./Data/processed_data/train_data.csv',
+
     'output_base': r'./model',
     'run_name': 'taste_train',
 
@@ -49,7 +73,7 @@ DEFAULT_CONFIG = {
     # Model
     'hidden_dim': 384,
     'query_dim': 64,
-    'dropout': 0.25,    # reduced from 0.3 — EMA + noise already provide regularization
+    'dropout': 0.25,
 
     # Auxiliary loss weights and inference blend
     'use_aux_loss': True,
@@ -72,10 +96,10 @@ DEFAULT_CONFIG = {
 
     # Augmentation
     'noise_std': 0.03,
-    'feat_mask_prob': 0.15,
+    'feat_mask_prob': 0.25,
     'use_mixup': True,
     'mixup_alpha': 0.2,
-    'label_smoothing': 0.05,
+    'label_smoothing': 0.1,
 
     'use_smote': True,
     'smote_label_indices': [4, 5],
@@ -94,18 +118,18 @@ DEFAULT_CONFIG = {
     'tune_thresholds': True,
     'threshold_grid_step': 0.02,
 
-    # Label-frequency weighted ASL: upweight rare labels, w_c = (N/pos_c)^power, clipped
+    # Label-frequency weighted ASL: upweight rare labels, w_c = (N/pos_c)^power.
+    # The weights are normalized to mean 1.0 after SMOTE. Historical fold-wise
+    # maxima are about 2.3, so the previous clip=20.0 was inactive.
     'use_label_weights': True,
     'label_weight_power': 0.5,    # sqrt of inverse frequency (softer than linear)
-    'label_weight_clip': 20.0,    # cap to avoid extreme weights on very rare labels
-
-    # Early stopping monitor: (macro_auroc + macro_auprc) / 2
-    'es_monitor': 'auroc_auprc',
+    'label_weight_clip': 1,    # optional cap after normalization; tune only if needed
 
     # CV
     'n_folds': 5,
+    'n_repeats': 5,
     'patience': 15,
-    'random_state': 42,
+    'random_state': GLOBAL_SEED,
     'use_amp': False,
 }
 
@@ -156,9 +180,21 @@ def smote_minority(X_embed: np.ndarray, X_desc: np.ndarray, Y: np.ndarray,
     embed_dim = X_embed.shape[1]
     X = np.concatenate([X_embed, X_desc], axis=1).astype(np.float32)
     X_parts, Y_parts = [X], [Y]
+    factor_by_label = {
+        int(label): float(factor)
+        for label, factor in (aug_per_label or {}).items()
+    }
 
-    for label_idx in label_indices:
-        factor = (aug_per_label or {}).get(label_idx, aug_factor)
+    for raw_label_idx in label_indices:
+        label_idx = int(raw_label_idx)
+        if not 0 <= label_idx < Y.shape[1]:
+            raise ValueError(
+                f"SMOTE label index {label_idx} is outside [0, {Y.shape[1] - 1}].")
+        factor = factor_by_label.get(label_idx, aug_factor)
+        if factor < 0:
+            raise ValueError("SMOTE augmentation factors must be non-negative.")
+        if factor == 0:
+            continue
         pos_mask = Y[:, label_idx] == 1
         X_pos, y_pos = X[pos_mask], Y[pos_mask]
         n = len(X_pos)
@@ -185,8 +221,9 @@ def smote_minority(X_embed: np.ndarray, X_desc: np.ndarray, Y: np.ndarray,
 
 def mixup_batch(x_embed: torch.Tensor, x_desc: torch.Tensor,
                 y: torch.Tensor, alpha: float = 0.2):
+    """Apply one shared Mixup permutation to both feature branches and labels."""
     lam = float(np.random.beta(alpha, alpha)) if alpha > 0 else 1.0
-    lam = max(lam, 1 - lam)  # asymmetric: always ≥ 0.5, dominant sample preserved
+    lam = max(lam, 1 - lam)  # Keep the dominant sample weight at least 0.5.
     B = x_embed.size(0)
     idx = torch.randperm(B, device=x_embed.device)
     return (lam * x_embed + (1 - lam) * x_embed[idx],
@@ -211,6 +248,7 @@ class ModelEMA:
 
 
 def compute_sample_weights(Y: np.ndarray) -> np.ndarray:
+    """Return normalized sample weights based on each row's rare labels."""
     N = len(Y)
     freq = Y.sum(axis=0).clip(min=1) / N
     rare_w = 1.0 / (freq + 1e-6)
@@ -239,9 +277,11 @@ class MolecularDataset(Dataset):
         return len(self.X_embed)
 
     def __getitem__(self, idx):
-        xe = self.X_embed[idx].clone()
-        xd = self.X_desc[idx].clone()
+        xe = self.X_embed[idx]
+        xd = self.X_desc[idx]
         if self.training:
+            xe = xe.clone()
+            xd = xd.clone()
             if self.noise_std > 0:
                 xe += torch.randn_like(xe) * self.noise_std
                 xd += torch.randn_like(xd) * self.noise_std
@@ -252,12 +292,14 @@ class MolecularDataset(Dataset):
 
 
 def _mlp_block(in_dim: int, out_dim: int, dropout: float) -> nn.Sequential:
+    """Build the linear, normalization, activation, and dropout unit."""
     return nn.Sequential(
         nn.Linear(in_dim, out_dim), nn.LayerNorm(out_dim), nn.GELU(), nn.Dropout(dropout)
     )
 
 
 class EnhancedMultiLabelModel(nn.Module):
+    """Dual-branch label-query network used by DLMTF-Net."""
     def __init__(self, embed_dim: int = 768, desc_dim: int = 300,
                  hidden_dim: int = 256, query_dim: int = 64,
                  num_classes: int = 138, dropout: float = 0.3,
@@ -275,7 +317,7 @@ class EnhancedMultiLabelModel(nn.Module):
             _mlp_block(256, hidden_dim, dropout * 0.5),
         )
 
-        # fusion: cat(h_e, h_d, h_e*h_d) → 3H → 2H → H
+        # Fusion combines both branches and their element-wise interaction.
         self.fusion = nn.Sequential(
             _mlp_block(hidden_dim * 3, hidden_dim * 2, dropout),
             _mlp_block(hidden_dim * 2, hidden_dim, dropout * 0.5),
@@ -322,6 +364,7 @@ class EnhancedMultiLabelModel(nn.Module):
 
 def multilabel_supcon_loss(z: torch.Tensor, y: torch.Tensor,
                            temperature: float = 0.07) -> torch.Tensor:
+    """Compute supervised contrastive loss using shared positive labels."""
     B, device = z.size(0), z.device
     sim = torch.matmul(z, z.T) / temperature
     pos_mask = (torch.matmul(y, y.T) > 0).float()
@@ -335,6 +378,7 @@ def multilabel_supcon_loss(z: torch.Tensor, y: torch.Tensor,
 
 
 def get_cosine_schedule_with_warmup(optimizer, warmup_steps: int, total_steps: int):
+    """Create a linear-warmup, cosine-decay learning-rate scheduler."""
     def lr_lambda(step):
         if step < warmup_steps:
             return step / max(1, warmup_steps)
@@ -345,6 +389,7 @@ def get_cosine_schedule_with_warmup(optimizer, warmup_steps: int, total_steps: i
 
 def compute_metrics(y_true: np.ndarray, y_prob: np.ndarray,
                     thresholds: Optional[np.ndarray] = None) -> Dict:
+    """Compute multilabel F1 and average-precision metrics."""
     if thresholds is None:
         thresholds = np.full(y_true.shape[1], 0.5)
     y_pred = (y_prob >= thresholds).astype(int)
@@ -362,6 +407,11 @@ def compute_metrics(y_true: np.ndarray, y_prob: np.ndarray,
     except Exception:
         pass
     return metrics
+
+
+def early_stopping_score(metrics: Dict) -> float:
+    """Return the fixed validation score used for checkpoint selection."""
+    return (metrics['macro_auroc'] + metrics['macro_auprc']) / 2.0
 
 
 def tune_thresholds(y_true: np.ndarray, y_prob: np.ndarray,
@@ -408,6 +458,7 @@ def resolve_model_dir(model_dir: str) -> str:
 
 
 def load_run_config(model_dir: str) -> Tuple[dict, list]:
+    """Load a run's saved configuration and ordered label names."""
     with open(os.path.join(model_dir, 'config.json')) as f:
         config = json.load(f)
     with open(os.path.join(model_dir, 'label_cols.json')) as f:
@@ -416,6 +467,7 @@ def load_run_config(model_dir: str) -> Tuple[dict, list]:
 
 
 def build_model(config: dict, device: torch.device) -> EnhancedMultiLabelModel:
+    """Instantiate DLMTF-Net from a serialized run configuration."""
     return EnhancedMultiLabelModel(
         embed_dim=config['embed_dim'],
         desc_dim=config['desc_dim'],
@@ -430,28 +482,81 @@ def build_model(config: dict, device: torch.device) -> EnhancedMultiLabelModel:
 def load_fold_models(model_dir: str, device: torch.device,
                      verbose: bool = True) -> Tuple[List[EnhancedMultiLabelModel],
                                                     np.ndarray, dict, list]:
-    """Load all fold checkpoints. Returns models, avg_thresholds, config, label_cols."""
+    """Load all checkpoints, including folds nested under repeated runs."""
+    repeated_runs, config, label_cols = load_repeated_fold_models(
+        model_dir, device, verbose=verbose)
+    models = [model for run in repeated_runs for model in run['models']]
+    thresholds = [run['thresholds'] for run in repeated_runs]
+    return models, np.mean(thresholds, axis=0), config, label_cols
+
+
+def load_repeated_fold_models(model_dir: str, device: torch.device,
+                              verbose: bool = True) -> Tuple[List[Dict], dict, list]:
+    """Load fold models from repeated-run or single-run layouts."""
     config, label_cols = load_run_config(model_dir)
-    fold_dirs = sorted(d for d in os.listdir(model_dir) if d.startswith('fold_'))
-    models, thresholds_list = [], []
+    legacy_folds = [d for d in os.listdir(model_dir) if d.startswith('fold_')]
+    if legacy_folds:
+        repeat_dirs = [(1, 'repeat_1_legacy', model_dir,
+                        int(config.get('random_state', GLOBAL_SEED)))]
+    else:
+        repeat_dirs = []
+        for name in os.listdir(model_dir):
+            path = os.path.join(model_dir, name)
+            if not name.startswith('repeat_') or not os.path.isdir(path):
+                continue
+            match = re.fullmatch(r'repeat_(\d+)_seed_(-?\d+)', name)
+            if match is None:
+                raise ValueError(
+                    f"Invalid repeat directory name '{name}'. Expected "
+                    "'repeat_<index>_seed_<seed>'.")
+            repeat_dirs.append((int(match.group(1)), name, path,
+                                int(match.group(2))))
+        repeat_dirs.sort(key=lambda item: item[0])
 
-    for fd in fold_dirs:
-        ckpt = torch.load(os.path.join(model_dir, fd, 'model.pt'),
-                          map_location=device, weights_only=False)
-        model = build_model(config, device)
-        model.load_state_dict(ckpt['model_state_dict'])
-        model.eval()
-        models.append(model)
-        thresholds_list.append(ckpt['thresholds'])
-        if verbose:
-            print(f"  Loaded {fd}")
+    repeated_runs = []
+    for repeat_index, repeat_name, repeat_dir, repeat_seed in repeat_dirs:
+        fold_dirs = sorted(
+            (d for d in os.listdir(repeat_dir) if d.startswith('fold_')),
+            key=lambda name: int(name.split('_')[-1]),
+        )
+        models, thresholds_list = [], []
+        for fold_dir in fold_dirs:
+            ckpt = torch.load(
+                os.path.join(repeat_dir, fold_dir, 'model.pt'),
+                map_location=device, weights_only=False)
+            model = build_model(config, device)
+            model.load_state_dict(ckpt['model_state_dict'])
+            model.eval()
+            models.append(model)
+            thresholds_list.append(np.asarray(ckpt['thresholds']))
+            if verbose:
+                print(f"  Loaded {repeat_name}/{fold_dir}")
 
-    return models, np.mean(thresholds_list, axis=0), config, label_cols
+        if models:
+            repeat_threshold_path = os.path.join(
+                repeat_dir, 'repeat_thresholds.npy')
+            thresholds = (
+                np.load(repeat_threshold_path)
+                if os.path.exists(repeat_threshold_path)
+                else np.mean(thresholds_list, axis=0)
+            )
+            repeated_runs.append({
+                'repeat': repeat_index,
+                'name': repeat_name,
+                'seed': repeat_seed,
+                'models': models,
+                'thresholds': thresholds,
+            })
+
+    if not repeated_runs:
+        raise FileNotFoundError(f"No fold checkpoints found in {model_dir}")
+    return repeated_runs, config, label_cols
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def predict_batch(model: nn.Module, loader: DataLoader, device: torch.device,
                   infer_weights) -> np.ndarray:
+    """Return blended multilabel probabilities for every loader batch."""
     model.eval()
     all_probs = []
     for x_embed, x_desc, _ in loader:
@@ -461,7 +566,7 @@ def predict_batch(model: nn.Module, loader: DataLoader, device: torch.device,
     return np.vstack(all_probs)
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def predict_single_ensemble(models: List[EnhancedMultiLabelModel],
                             x_embed: np.ndarray, x_desc: np.ndarray,
                             infer_weights, device: torch.device) -> np.ndarray:
@@ -479,6 +584,7 @@ def train_epoch(model: nn.Module, loader: DataLoader, asl_fn: AsymmetricLoss,
                 optimizer, scheduler, ema: Optional[ModelEMA],
                 device: torch.device, config: Dict, epoch: int,
                 scaler=None) -> Dict:
+    """Train one epoch and return sample-weighted loss components."""
     model.train()
     total = total_main = total_aux = 0.0
     N = 0
@@ -490,7 +596,7 @@ def train_epoch(model: nn.Module, loader: DataLoader, asl_fn: AsymmetricLoss,
         if config['use_mixup']:
             xe, xd, y = mixup_batch(xe, xd, y, config['mixup_alpha'])
 
-        # Label smoothing: push hard 0/1 targets towards ε/2 and 1-ε/2
+        # Move hard targets toward 0.5 before computing the loss.
         y_s = y * (1 - smooth) + smooth * 0.5 if smooth > 0 else y
 
         optimizer.zero_grad()
@@ -538,6 +644,7 @@ def train_epoch(model: nn.Module, loader: DataLoader, asl_fn: AsymmetricLoss,
 @torch.no_grad()
 def val_epoch(model: nn.Module, loader: DataLoader, asl_fn: AsymmetricLoss,
               device: torch.device, config: Dict) -> Tuple[Dict, np.ndarray, np.ndarray]:
+    """Evaluate one fold and return metrics, labels, and probabilities."""
     model.eval()
     all_probs, all_labels = [], []
     total_loss = N = 0
@@ -555,7 +662,7 @@ def val_epoch(model: nn.Module, loader: DataLoader, asl_fn: AsymmetricLoss,
     metrics = compute_metrics(y_true, y_prob)
     metrics['loss'] = total_loss / N
 
-    # Per-label AUROC for combined monitor (same as MLP baseline)
+    # Compute AUROC label by label so labels with one observed class can be skipped.
     auroc_list = []
     for c in range(y_true.shape[1]):
         try:
@@ -564,15 +671,20 @@ def val_epoch(model: nn.Module, loader: DataLoader, asl_fn: AsymmetricLoss,
         except Exception:
             auroc_list.append(np.nan)
     metrics['macro_auroc'] = float(np.nanmean(auroc_list))
-    metrics['monitor'] = (metrics['macro_auroc'] + metrics['macro_auprc']) / 2  # combined monitor
+    metrics['monitor'] = early_stopping_score(metrics)
 
     return metrics, y_true, y_prob
 
 
 def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
                X_embed: np.ndarray, X_desc: np.ndarray, Y: np.ndarray,
-               config: Dict, device: torch.device, logger: logging.Logger) -> Dict:
+               config: Dict, device: torch.device, logger: logging.Logger,
+               repeat_dir: Path, fold_seed: int
+               ) -> Tuple[Dict, np.ndarray, np.ndarray]:
+    """Fit one cross-validation fold and persist its best checkpoint."""
+    set_global_seed(fold_seed)
     logger.info(f"\nFold {fold+1}/{config['n_folds']}")
+    logger.info(f"  Fold seed: {fold_seed}")
 
     X_e_tr, X_e_val = X_embed[train_idx], X_embed[val_idx]
     X_d_tr, X_d_val = X_desc[train_idx], X_desc[val_idx]
@@ -588,7 +700,7 @@ def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
             aug_factor=config['smote_aug_factor'],
             aug_per_label=config.get('smote_aug_factor_per_label'),
         )
-        logger.info(f"  SMOTE: {n_before} → {len(Y_tr)} samples")
+        logger.info(f"  SMOTE: {n_before} -> {len(Y_tr)} samples")
 
     # Datasets with online noise + masking
     train_ds = MolecularDataset(X_e_tr, X_d_tr, Y_tr,
@@ -600,12 +712,15 @@ def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
     # Weighted sampler (computed on original + SMOTE-augmented train labels)
     if config['use_weighted_sampler']:
         sw = compute_sample_weights(Y_tr)
-        sampler = WeightedRandomSampler(torch.FloatTensor(sw), len(sw), replacement=True)
+        generator = torch.Generator().manual_seed(fold_seed)
+        sampler = WeightedRandomSampler(torch.FloatTensor(sw), len(sw), replacement=True,
+                                        generator=generator)
         train_loader = DataLoader(train_ds, batch_size=config['batch_size'],
                                   sampler=sampler, drop_last=True)
     else:
+        generator = torch.Generator().manual_seed(fold_seed)
         train_loader = DataLoader(train_ds, batch_size=config['batch_size'],
-                                  shuffle=True, drop_last=True)
+                                  shuffle=True, drop_last=True, generator=generator)
     val_loader = DataLoader(val_ds, batch_size=config['batch_size'])
 
     model = EnhancedMultiLabelModel(
@@ -619,12 +734,35 @@ def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
     label_weights = None
     if config.get('use_label_weights', False):
         pos_freq = Y_tr.sum(0).clip(min=1) / len(Y_tr)  # [C] positive frequency per label
-        pw = config.get('label_weight_power', 0.5)
+        pw = float(config.get('label_weight_power', 0.5))
+        if pw < 0:
+            raise ValueError("label_weight_power must be non-negative.")
         lw = np.power(1.0 / pos_freq, pw)               # inverse-freq raised to power
         lw = lw / lw.mean()                              # normalize so mean weight = 1
-        lw = lw.clip(max=config.get('label_weight_clip', 20.0))
+
+        clip = config.get('label_weight_clip')
+        unclipped_max = float(lw.max())
+        clipped_count = 0
+        if clip is not None:
+            clip = float(clip)
+            if clip < 1.0:
+                raise ValueError(
+                    "label_weight_clip must be at least 1.0 because label "
+                    "weights are normalized to mean 1.0 before clipping.")
+            clipped_count = int(np.count_nonzero(lw > clip))
+            lw = lw.clip(max=clip)
+
         label_weights = torch.FloatTensor(lw).to(device)
-        logger.info(f"  Label weights: min={label_weights.min():.2f}  mean=1.00  max={label_weights.max():.2f}")
+        logger.info(
+            f"  Label weights: power={pw:g}  clip={clip}  "
+            f"min={lw.min():.3f}  mean={lw.mean():.3f}  "
+            f"max={lw.max():.3f}  unclipped_max={unclipped_max:.3f}  "
+            f"clipped_labels={clipped_count}/{len(lw)}")
+        if clip is not None and clipped_count == 0:
+            logger.warning(
+                f"  label_weight_clip={clip:g} is inactive because the "
+                f"largest normalized label weight is {unclipped_max:.3f}; "
+                "changing this cap will not affect training.")
 
     asl_fn = AsymmetricLoss(config['asl_gamma_neg'], config['asl_gamma_pos'], config['asl_clip'],
                             label_weights=label_weights)
@@ -659,10 +797,10 @@ def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
                 f"Ep {epoch+1:3d}  "
                 f"Loss={train_m['loss']:.4f} (main={train_m['loss_main']:.4f} aux={train_m['loss_aux']:.4f})  "
                 f"F1={val_m['macro_f1']:.4f}  AUPRC={val_m['macro_auprc']:.4f}  "
-                f"Monitor={(val_m['macro_auroc']+val_m['macro_auprc'])/2:.4f}"
+                f"Monitor={val_m['monitor']:.4f}"
             )
 
-        monitor_val = (val_m['macro_auroc'] + val_m['macro_auprc']) / 2  # es_monitor: auroc_auprc
+        monitor_val = val_m['monitor']
         if monitor_val > best_monitor:
             best_monitor = monitor_val
             patience = 0
@@ -684,7 +822,7 @@ def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
     logger.info(f"  Fold {fold+1} result: F1={val_metrics['macro_f1']:.4f}  "
                 f"AUPRC={val_metrics['macro_auprc']:.4f}")
 
-    fold_dir = Path(config['output_dir']) / f'fold_{fold+1}'
+    fold_dir = repeat_dir / f'fold_{fold+1}'
     fold_dir.mkdir(parents=True, exist_ok=True)
     torch.save({
         'model_state_dict': eval_model.state_dict(),
@@ -695,18 +833,27 @@ def train_fold(fold: int, train_idx: np.ndarray, val_idx: np.ndarray,
     }, fold_dir / 'model.pt')
     pd.DataFrame(history).to_csv(fold_dir / 'history.csv', index=False)
 
-    return val_metrics
+    return val_metrics, y_val_true, y_val_prob
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default=None)
+    """Run repeated multilabel-stratified training from defaults or JSON."""
+    parser = argparse.ArgumentParser(
+        description=(
+            'Train DLMTF-Net with repeated multilabel-stratified '
+            'cross-validation.'))
+    parser.add_argument(
+        '--config', type=str, default=None,
+        help='JSON file whose values override DEFAULT_CONFIG')
     args = parser.parse_args()
 
     config = DEFAULT_CONFIG.copy()
     if args.config and os.path.exists(args.config):
         with open(args.config) as f:
             config.update(json.load(f))
+
+    base_seed = int(config.get('random_state', GLOBAL_SEED))
+    set_global_seed(base_seed)
 
     ts = datetime.now().strftime('%Y%m%d_%H%M')
     config['output_dir'] = os.path.join(config['output_base'], f"{config['run_name']}_{ts}")
@@ -721,29 +868,37 @@ def main():
         ]
     )
     logger = logging.getLogger(__name__)
-    with open(os.path.join(config['output_dir'], 'config.json'), 'w') as f:
-        json.dump(config, f, indent=4)
-
     logger.info("DLMTF-Net: Dual-branch Label-aware Molecular Taste Fusion Network")
-    logger.info(f"ASL(γ-={config['asl_gamma_neg']}, γ+={config['asl_gamma_pos']}, clip={config['asl_clip']})  "
+    logger.info(f"ASL(gamma_neg={config['asl_gamma_neg']}, gamma_pos={config['asl_gamma_pos']}, clip={config['asl_clip']})  "
                 f"noise={config['noise_std']}  mask={config['feat_mask_prob']}  "
                 f"smooth={config['label_smoothing']}  smote={config['use_smote']}")
 
-    df_labels  = pd.read_csv(config['labels_train_path'])
-    label_cols = [c for c in df_labels.columns if c != 'SMILES']
-
-    df_mordred   = pd.read_csv(config['mordred_train_path'])
-    mordred_cols = [c for c in df_mordred.columns if c not in ['SMILES'] + label_cols]
+    df_mordred = pd.read_csv(config['mordred_train_path'])
+    df_labels = pd.read_csv(config['labels_train_path'])
+    if 'SMILES' in df_mordred and 'SMILES' in df_labels:
+        if not np.array_equal(
+                df_mordred['SMILES'].astype(str).to_numpy(),
+                df_labels['SMILES'].astype(str).to_numpy()):
+            raise ValueError("Mordred and label SMILES rows are not aligned.")
+    label_cols = [c for c in df_labels.columns if c.startswith('TARGET_')]
+    mordred_cols = [
+        c for c in df_mordred.columns if c not in ['SMILES'] + label_cols
+    ]
 
     X_embed = np.load(config['unimol_train_path']).astype(np.float32)
-    X_desc  = df_mordred[mordred_cols].values.astype(np.float32)
-    Y       = df_mordred[label_cols].values.astype(np.float32)
-    assert X_embed.shape[0] == len(df_mordred), \
-        f"Row count mismatch: UniMol={X_embed.shape[0]}, Mordred={len(df_mordred)}"
+    X_desc = df_mordred[mordred_cols].values.astype(np.float32)
+    Y = df_labels[label_cols].values.astype(np.float32)
+    if not (len(X_embed) == len(X_desc) == len(Y)):
+        raise ValueError(
+            f"Row count mismatch: UniMol={len(X_embed)}, "
+            f"Mordred={len(X_desc)}, labels={len(Y)}.")
 
     config['embed_dim']   = X_embed.shape[1]
     config['desc_dim']    = X_desc.shape[1]
     config['num_classes'] = Y.shape[1]
+
+    with open(os.path.join(config['output_dir'], 'config.json'), 'w') as f:
+        json.dump(config, f, indent=4)
 
     logger.info(f"X_embed={X_embed.shape}, X_desc={X_desc.shape}, Y={Y.shape}  "
                 f"pos/label: min={Y.sum(0).min():.0f} mean={Y.sum(0).mean():.1f} max={Y.sum(0).max():.0f}")
@@ -754,19 +909,68 @@ def main():
     with open(os.path.join(config['output_dir'], 'label_cols.json'), 'w') as f:
         json.dump(label_cols, f)
 
-    skf = StratifiedKFold(n_splits=config['n_folds'], shuffle=True,
-                          random_state=config['random_state'])
     fold_results = []
-    for fold, (tr_idx, val_idx) in enumerate(skf.split(X_embed, Y[:, 0])):
-        r = train_fold(fold, tr_idx, val_idx, X_embed, X_desc, Y, config, device, logger)
-        fold_results.append(r)
+    repeat_results = []
+    n_repeats = int(config.get('n_repeats', 1))
+    repeat_seeds = [base_seed + i for i in range(n_repeats)]
+    logger.info(f"Repeated experiments: {n_repeats}; seeds={repeat_seeds}")
+
+    for repeat_index, repeat_seed in enumerate(repeat_seeds, start=1):
+        set_global_seed(repeat_seed)
+        repeat_dir = (Path(config['output_dir']) /
+                      f'repeat_{repeat_index}_seed_{repeat_seed}')
+        repeat_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            f"\nREPEAT {repeat_index}/{n_repeats} (seed={repeat_seed})")
+        splitter = MultilabelStratifiedKFold(
+            n_splits=config['n_folds'], shuffle=True,
+            random_state=repeat_seed)
+        oof_probabilities = np.full(Y.shape, np.nan, dtype=np.float32)
+
+        for fold, (train_idx, val_idx) in enumerate(
+                splitter.split(X_embed, Y)):
+            fold_seed = repeat_seed + fold * 10_000
+            metrics, y_val_true, y_val_prob = train_fold(
+                fold, train_idx, val_idx, X_embed, X_desc, Y, config,
+                device, logger, repeat_dir, fold_seed)
+            if not np.array_equal(y_val_true, Y[val_idx]):
+                raise RuntimeError(
+                    "Validation labels are not aligned with OOF indices.")
+            oof_probabilities[val_idx] = y_val_prob
+            fold_results.append({
+                'repeat': repeat_index,
+                'repeat_seed': repeat_seed,
+                'fold': fold + 1,
+                **metrics,
+            })
+        if not np.isfinite(oof_probabilities).all():
+            raise RuntimeError("OOF predictions are incomplete.")
+
+        repeat_thresholds = (
+            tune_thresholds(Y, oof_probabilities,
+                            config['threshold_grid_step'])
+            if config['tune_thresholds']
+            else np.full(config['num_classes'], 0.5)
+        )
+        repeat_metrics = compute_metrics(
+            Y, oof_probabilities, repeat_thresholds)
+        repeat_results.append({
+            'repeat': repeat_index,
+            'seed': repeat_seed,
+            **repeat_metrics,
+        })
+        np.save(repeat_dir / 'repeat_thresholds.npy', repeat_thresholds)
+        np.save(repeat_dir / 'oof_probabilities.npy', oof_probabilities)
 
     logger.info("\nCROSS-VALIDATION RESULTS")
     for key in ['macro_f1', 'micro_f1', 'macro_auprc', 'micro_auprc']:
-        vals = [r[key] for r in fold_results]
-        logger.info(f"  {key}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
+        vals = [result[key] for result in repeat_results]
+        std = np.std(vals, ddof=1) if len(vals) > 1 else 0.0
+        logger.info(f"  {key}: {np.mean(vals):.4f} +/- {std:.4f}")
 
     pd.DataFrame(fold_results).to_csv(os.path.join(config['output_dir'], 'cv_results.csv'), index=False)
+    pd.DataFrame(repeat_results).to_csv(
+        os.path.join(config['output_dir'], 'repeated_cv_results.csv'), index=False)
     with open(os.path.join(config['output_base'], 'latest.txt'), 'w') as f:
         f.write(config['output_dir'])
     logger.info(f"Saved to: {config['output_dir']}")

@@ -22,8 +22,8 @@ import sys
 import argparse
 import torch
 
-sys.path.insert(0, '/Uni-Core')
-sys.path.insert(0, '/Uni-Mol/unimol2')
+sys.path.insert(0, '../Uni-Core')
+sys.path.insert(0, '../Uni-Mol/unimol2')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lora_modules import LoRALinear

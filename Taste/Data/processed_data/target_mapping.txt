@@ -1,0 +1,6 @@
+Sweet → TARGET_01
+Bitter → TARGET_02
+Umami→ TARGET_03
+Sour → TARGET_04
+Salty → TARGET_05
+Other → TARGET_06
